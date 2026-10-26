@@ -1,0 +1,55 @@
+ame: Spieltag-Vorschau
+
+on:
+  schedule:
+    - cron: "0 16 * * 4"        # donnerstags ca. 17 bzw. 18 Uhr deutscher Zeit
+  workflow_dispatch:            # zum Testen per Klick im Actions-Tab
+
+permissions:
+  contents: write
+
+jobs:
+  vorschau:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten installieren
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Spiel holen und Bilder erstellen
+        id: render
+        env:
+          SPIELPLAN_CSV_URL: ${{ secrets.SPIELPLAN_CSV_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python main.py render
+
+      - name: Bilder ins Repo speichern
+        if: steps.render.outputs.neu == 'true'
+        run: |
+          git config user.name "spieltag-bot"
+          git config user.email "spieltag-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "Spieltag-Vorschau $(date +%F)"
+          git push
+          echo "COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Auf Instagram posten
+        if: steps.render.outputs.neu == 'true'
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+        run: python main.py post
+
+      - name: Merkliste speichern
+        if: steps.render.outputs.neu == 'true'
+        run: |
+          git add -A
+          git commit -m "Merkliste aktualisiert" || echo "Nichts Neues"
+          git push
